@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="流键 TypingFlow —— 支持计时、单词、句子、代码、符号与中文六种模式的打字训练工具">
+<title>流键 TypingFlow · 打字训练</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ══════════ 顶栏 ══════════ -->
+  <header class="topbar">
+    <a class="brand" href="#" id="brand" title="重新开始">
+      <span class="brand-mark">K</span>
+      <span class="brand-text">流键<i>TypingFlow</i></span>
+    </a>
+
+    <nav class="mode-nav" id="modeNav">
+      <button data-mode="time" class="active">计时</button>
+      <button data-mode="words">单词</button>
+      <button data-mode="quote">句子</button>
+      <button data-mode="code">代码</button>
+      <button data-mode="symbols">符号</button>
+      <button data-mode="chinese">中文</button>
+      <button data-mode="custom">自定义</button>
+    </nav>
+
+    <div class="topbar-right">
+      <button class="icon-btn" id="recordsBtn" title="历史记录">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/>
+        </svg>
+      </button>
+      <button class="icon-btn on" id="kbBtn" title="虚拟键盘">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>
+        </svg>
+      </button>
+      <button class="icon-btn" id="themeBtn" title="切换主题">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+        </svg>
+      </button>
+      <button class="icon-btn" id="settingsBtn" title="设置">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 003.49 15a1.65 1.65 0 00-1.51-1H2a2 2 0 010-4h.09A1.65 1.65 0 003.6 8.6a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 008 4.28 1.65 1.65 0 009 2.77V2a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 8c.14.36.47.62.85.7H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ══════════ 子选项 ══════════ -->
+  <section class="subbar" id="subbar"></section>
+
+  <!-- ══════════ 打字舞台 ══════════ -->
+  <main class="stage" id="stage">
+    <div class="typing-wrap idle" id="typingWrap">
+      <div class="words" id="words"></div>
+      <div class="caret blink" id="caret"></div>
+    </div>
+    <div class="hint" id="hint">开始输入以计时 ｜ 按 <b>Tab</b> 重开</div>
+  </main>
+
+  <!-- ══════════ 统计栏 ══════════ -->
+  <footer class="hud">
+    <div class="hud-left">
+      <button class="restart-btn" id="restartBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>
+        </svg>
+        重开 <kbd style="opacity:.5;font-size:11px">Tab</kbd>
+      </button>
+    </div>
+
+    <div class="stats">
+      <div class="stat primary"><b id="sWpm">0</b><span>WPM</span></div>
+      <div class="stat"><b id="sAcc">100%</b><span>准确率</span></div>
+      <div class="stat"><b id="sProgress">0/0</b><span id="sProgressLabel">字符</span></div>
+      <div class="stat"><b id="sTime">—</b><span id="sTimeLabel">时间</span></div>
+    </div>
+  </footer>
+
+  <!-- ══════════ 虚拟键盘 ══════════ -->
+  <div class="keyboard show" id="keyboard"></div>
+</div>
+
+<!-- ══════════ 遮罩层 ══════════ -->
+<div class="overlay" id="overlay"></div>
+
+<!-- 中文输入法捕获框 -->
+<textarea class="ime-input" id="imeInput" autocomplete="off" autocorrect="off"
+          autocapitalize="off" spellcheck="false" tabindex="-1"></textarea>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

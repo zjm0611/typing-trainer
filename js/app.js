@@ -119,6 +119,96 @@
   const sTime = $('#sTime');
   const sTimeLabel = $('#sTimeLabel');
 
+  /* ══════════════════ 4.1 视口与输入捕获 ══════════════════ */
+
+  /**
+   * 是不是触摸设备（手机／平板）。
+   * 触摸设备没有物理键盘，keydown 收不到字，只能靠聚焦一个输入框唤起系统键盘。
+   */
+  const COARSE = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  // 挂到 <html> 上，好让样式能按「设备」而不是「宽度」分支：
+  // 手机横屏宽度会超过 720px，光靠 max-width 媒体查询兜不住。
+  if (COARSE) document.documentElement.classList.add('is-touch');
+
+  /**
+   * 把「可视区高度」写进 CSS 变量 --app-h。
+   * 手机上系统键盘弹起时 visualViewport 会变矮，外壳高度跟着缩，
+   * 底部统计栏才不会被键盘顶出屏幕（这是 100vh 做不到的）。
+   */
+  function syncViewport() {
+    const vv = window.visualViewport;
+    const h = Math.round((vv ? vv.height : window.innerHeight) || 0);
+    if (h > 0) document.documentElement.style.setProperty('--app-h', h + 'px');
+  }
+  syncViewport();
+  window.addEventListener('resize', syncViewport);
+  window.addEventListener('orientationchange', syncViewport);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', syncViewport);
+    window.visualViewport.addEventListener('scroll', syncViewport);
+  }
+
+  /**
+   * 退格保底哨兵。
+   * 输入框清空后，手机上再按退格浏览器不会再触发 input 事件（值没变化），
+   * 结果就是「退格删不动」。所以在框里常驻一个零宽字符，
+   * 每次删掉的都是它，input 必然触发，处理完再补回去。
+   */
+  const SENTINEL = '\u200b';
+
+  function resetCapture() {
+    imeEl.value = SENTINEL;
+    try { imeEl.setSelectionRange(SENTINEL.length, SENTINEL.length); } catch (e) { /* 忽略 */ }
+  }
+
+  /**
+   * 同一个字符可能被 keydown 与 input 两条通道同时送来（部分安卓输入法
+   * preventDefault 拦不住）。跨通道 30ms 内同签名只认第一条；
+   * 同通道的连击与长按连发不设限，免得把正常的连续输入吃掉。
+   */
+  let gateSrc = '', gateSig = '', gateTs = 0;
+
+  function gate(sig, src) {
+    const now = performance.now();
+    if (src !== gateSrc && sig === gateSig && now - gateTs < 30) return false;
+    gateSrc = src;
+    gateSig = sig;
+    gateTs = now;
+    return true;
+  }
+
+  /** 起始提示语：触屏上没有 Tab 键，措辞得跟着设备与模式走 */
+  function refreshHint() {
+    const open = COARSE ? '轻点文字区域开始输入' : (state.mode === 'time' ? '开始输入以计时' : '开始输入');
+    const redo = COARSE ? '点左下角重开' : '按 Tab 重开';
+    let extra = '';
+    if (state.mode === 'time') {
+      const best = getBest('time', state.sub);
+      if (best != null) extra = ` ｜ ${state.sub} 秒个人最佳 ${fmt(best)} WPM`;
+    }
+    hintEl.textContent = `${open} ｜ ${redo}${extra}`;
+  }
+
+  /** 要不要用隐藏输入框接字：触摸设备一律要，桌面只有中文模式要 */
+  function needCapture() {
+    return COARSE || MODE_CONFIG[state.mode].isIME;
+  }
+
+  function focusCapture() {
+    if (!needCapture()) return;
+    try {
+      imeEl.focus({ preventScroll: true });
+    } catch (e) {
+      imeEl.focus();
+    }
+  }
+
+  /** 触摸设备上还没聚焦输入框时，给提示语加个高亮，告诉用户「先点一下」 */
+  function syncCaptureHint() {
+    const off = COARSE && document.activeElement !== imeEl && !state.finished;
+    document.body.classList.toggle('capture-off', off);
+  }
+
   /* ══════════════════ 5. 语料生成 ══════════════════ */
 
   const PUNCT_MARKS = [',', ',', '.', '.', '.', ';', ':', '?', '!'];
@@ -609,74 +699,81 @@
     if (e.key === 'Tab') {
       e.preventDefault();
       restart();
+      focusCapture();
       return;
     }
 
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (IGNORE_KEYS.has(e.key)) return;
 
-    // 中文模式：交给输入法，只处理删除与回车
-    if (MODE_CONFIG[state.mode].isIME) {
-      // 输入法捕获框失焦时，用户一敲键就把它拉回来
-      if (document.activeElement !== imeEl) imeEl.focus();
-      if (e.key === 'Backspace') {
-        e.preventDefault();
-        handleBackspace();
-      }
-      return;
+    // 中文模式：输入法框失焦时拉回来。程序化聚焦在手机上会被忽略、还容易抢焦点，只在桌面做。
+    if (MODE_CONFIG[state.mode].isIME && !COARSE && document.activeElement !== imeEl) {
+      imeEl.focus();
     }
 
     if (e.key === 'Backspace') {
       e.preventDefault();
-      handleBackspace();
+      if (gate('bs', 'keydown')) handleBackspace();
       return;
     }
+
+    // 中文模式其余按键交给输入法，不再往下处理
+    if (MODE_CONFIG[state.mode].isIME) return;
 
     if (e.key === 'Enter') {
       if (state.mode === 'code') {
         e.preventDefault();
-        handleChar('\n');
+        if (gate('c:\n', 'keydown')) handleChar('\n');
       }
       return;
     }
 
     if (e.key.length === 1) {
       e.preventDefault();
-      handleChar(e.key);
+      if (gate('c:' + e.key, 'keydown')) handleChar(e.key);
     }
   });
 
-  /* ---------- 中文输入法捕获 ---------- */
+  /* ---------- 隐藏输入框：中文输入法与手机端全模式的输入来源 ---------- */
 
   imeEl.addEventListener('input', (e) => {
     if (e.isComposing) return;
 
-    const value = imeEl.value;
-    if (!value) return;
+    const it = e.inputType || '';
+    const chars = Array.from(imeEl.value).filter((c) => c !== SENTINEL);
 
-    if (e.inputType === 'deleteContentBackward') {
-      imeEl.value = '';
-      handleBackspace();
+    if (it === 'deleteContentBackward' || it === 'deleteContentForward') {
+      resetCapture();
+      if (gate('bs', 'input')) handleBackspace();
       return;
     }
 
-    // 逐字喂给引擎，兼容一次上屏多个汉字
-    const chars = Array.from(value);
-    imeEl.value = '';
+    resetCapture();
+    if (!chars.length) return;
+
+    const isCode = !!MODE_CONFIG[state.mode].isCode;
     chars.forEach((ch) => {
-      if (ch === '\n') return;
-      handleChar(ch);
+      // 换行只在代码模式有意义，其余模式忽略（手机键盘的回车键也走这里）
+      if (ch === '\n') {
+        if (isCode && gate('c:\n', 'input')) handleChar('\n');
+        return;
+      }
+      if (gate('c:' + ch, 'input')) handleChar(ch);
     });
   });
 
   imeEl.addEventListener('compositionend', () => {
     // 保底：部分输入法 compositionend 后 input 不触发
-    const value = imeEl.value;
-    if (!value) return;
-    const chars = Array.from(value);
-    imeEl.value = '';
-    chars.forEach((ch) => handleChar(ch));
+    const chars = Array.from(imeEl.value).filter((c) => c !== SENTINEL);
+    resetCapture();
+    if (!chars.length) return;
+    chars.forEach((ch) => {
+      if (gate('c:' + ch, 'input')) handleChar(ch);
+    });
   });
+
+  imeEl.addEventListener('focus', syncCaptureHint);
+  imeEl.addEventListener('blur', syncCaptureHint);
 
   /* ══════════════════ 12. 生命周期控制 ══════════════════ */
 
@@ -708,15 +805,17 @@
     caretReady = false;
     caretEl.classList.add('blink');
     hintEl.classList.remove('hidden');
+    refreshHint();
 
     render();
     refreshHud();
     highlightNext();
 
-    if (MODE_CONFIG[state.mode].isIME) {
-      imeEl.value = '';
-      imeEl.focus();
-    }
+    resetCapture();
+    syncCaptureHint();
+    // 注意：这里刻意不 focus。首次加载时不在用户手势里，程序化聚焦拿不到
+    // 系统键盘，却会让输入框处于「已聚焦」状态，导致之后真点一下反而唤不起键盘。
+    // 聚焦一律放在真实点击的处理函数里做。
   }
 
   function setMode(mode) {
@@ -783,6 +882,7 @@
         state.sub = sub;
         buildSubbar();
         restart();
+        focusCapture();
       };
       subbarEl.appendChild(btn);
     });
@@ -802,6 +902,7 @@
           saveSettings();
           buildSubbar();
           restart();
+          focusCapture();
         };
         subbarEl.appendChild(btn);
       });
@@ -879,7 +980,7 @@
         </div>` : ''}
 
         <div class="result-actions">
-          <button class="btn btn-primary" data-act="again">再来一轮 (Tab)</button>
+          <button class="btn btn-primary" data-act="again">再来一轮${COARSE ? '' : ' (Tab)'}</button>
           <button class="btn btn-ghost" data-act="history">历史记录</button>
           <button class="btn btn-ghost" data-act="close">关闭</button>
         </div>
@@ -892,7 +993,7 @@
     overlayEl.querySelectorAll('[data-act]').forEach((btn) => {
       btn.onclick = () => {
         const act = btn.dataset.act;
-        if (act === 'again') restart();
+        if (act === 'again') { restart(); focusCapture(); }
         else if (act === 'history') openHistory();
         else closeOverlay();
       };
@@ -906,9 +1007,14 @@
   }
 
   function closeOverlay() {
+    const wasOpen = overlayEl.classList.contains('show');
     overlayEl.classList.remove('show');
     overlayEl.innerHTML = '';
-    if (MODE_CONFIG[state.mode].isIME && !state.finished) imeEl.focus();
+    // 只有「本来开着面板」才把焦点还回去。否则 init → restart 会顺路聚焦，
+    // 首次加载不在用户手势里拿不到系统键盘，却让输入框变成「已聚焦」，
+    // 之后用户真点一下反而唤不起键盘了。
+    if (wasOpen && !state.finished) focusCapture();
+    syncCaptureHint();
   }
 
   /* ══════════════════ 15. 速度曲线绘制 ══════════════════ */
@@ -1212,7 +1318,7 @@
 
   function toggleRow(key, title, desc) {
     return `
-      <div class="setting">
+      <div class="setting" data-key="${key}">
         <div class="setting-text"><h4>${title}</h4><p>${desc}</p></div>
         <div class="switch ${settings[key] ? 'on' : ''}" data-toggle="${key}"></div>
       </div>
@@ -1377,10 +1483,11 @@
     const btn = e.target.closest('button[data-mode]');
     if (!btn) return;
     setMode(btn.dataset.mode);
+    focusCapture();
   });
 
-  $('#restartBtn').onclick = () => restart();
-  $('#brand').onclick = (e) => { e.preventDefault(); restart(); };
+  $('#restartBtn').onclick = () => { restart(); focusCapture(); };
+  $('#brand').onclick = (e) => { e.preventDefault(); restart(); focusCapture(); };
   $('#recordsBtn').onclick = openHistory;
   $('#settingsBtn').onclick = openSettings;
 
@@ -1400,10 +1507,22 @@
     highlightNext();
   };
 
-  // 点击打字区获取焦点（中文模式需要聚焦输入框）
-  wrapEl.addEventListener('click', () => {
-    if (MODE_CONFIG[state.mode].isIME) imeEl.focus();
+  // 手机上点打字区唤起系统键盘：必须是真实手势里调用 focus，否则浏览器不给弹键盘。
+  // 触摸设备的默认行为会在点按结束后把焦点清到 body，所以要在同一次 pointerdown
+  // 里 preventDefault 拦掉，紧接着聚焦才留得住（舞台本身不可滚动，拦掉无副作用）。
+  $('#stage').addEventListener('pointerdown', (e) => {
+    if (COARSE) e.preventDefault();
+    focusCapture();
   });
+
+  // 面板打开时收起键盘，把整块可视区让给面板；关上再把焦点还给打字区
+  new MutationObserver(() => {
+    if (overlayEl.classList.contains('show')) {
+      if (COARSE) imeEl.blur();
+    } else {
+      syncCaptureHint();
+    }
+  }).observe(overlayEl, { attributes: true, attributeFilter: ['class'] });
 
   // 失焦提示
   window.addEventListener('blur', () => {
@@ -1442,12 +1561,7 @@
     syncKeyboardVisibility();
     restart();
     refreshHud();
-
-    const best = getBest('time', 30);
-    if (best != null) {
-      hintEl.textContent =
-        `开始输入以计时 ｜ 按 Tab 重开 ｜ 30 秒个人最佳 ${fmt(best)} WPM`;
-    }
+    syncCaptureHint();
   }
 
   // 自定义文本变化时持久化

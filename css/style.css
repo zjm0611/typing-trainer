@@ -820,16 +820,42 @@ input, textarea { font-family: inherit; }
   box-shadow: var(--shadow-s);
 }
 
-/* 隐藏的输入捕获（中文输入法） */
+/* 隐藏的输入捕获框
+   桌面：中文模式靠它接输入法；
+   手机：所有模式都靠它——触摸设备没有物理 keydown，必须先聚焦一个输入框
+   才能唤起系统键盘。因此它必须留在视口内（挪到 left:-9999px 的话 iOS
+   会拒绝唤起键盘），并靠 opacity 隐形。font-size 必须 ≥16px，
+   否则 iOS Safari 聚焦时会自动放大整页。 */
 .ime-input {
   position: fixed;
-  opacity: 0;
-  pointer-events: none;
-  left: -9999px;
   top: 0;
-  width: 1px;
+  left: 0;
+  width: 100%;
   height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: .01;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font-size: 16px;
+  line-height: 1;
+  resize: none;
+  outline: none;
+  pointer-events: none;
+  overflow: hidden;
 }
+
+/* ---------- 触摸设备（按设备判定，与屏幕宽度无关） ----------
+   手机横屏时宽度会超过 720px，落到上面那段窄屏样式之外。
+   但「触摸设备没有物理键盘」这件事跟宽度无关，所以这几条单列出来。 */
+html.is-touch .keyboard { display: none !important; }
+html.is-touch #kbBtn { display: none; }
+/* 触摸设备用的是系统键盘，这个开关调什么都没有效果，藏掉免得白点 */
+html.is-touch .setting[data-key="keyboard"] { display: none; }
+html.is-touch .app { min-height: 0; height: var(--app-h, 100vh); }
+html.is-touch .overlay { height: var(--app-h, 100vh); }
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 1000px) {
@@ -844,16 +870,93 @@ input, textarea { font-family: inherit; }
 }
 
 @media (max-width: 720px) {
-  :root { --typing-size: 19px; }
-  .topbar { gap: 12px; }
-  .mode-nav { order: 3; width: 100%; }
-  .stats { margin-left: 0; width: 100%; justify-content: space-between; gap: 10px; }
-  .hud-right { display: none; }
-  .stat b { font-size: 17px; }
-  .panel { padding: 24px 20px; }
+  :root { --typing-size: 19px; --line-h: 1.72; }
+
+  /* 整页不滚动：外壳高度跟着「可视区」走（JS 把 visualViewport 高度写进 --app-h）。
+     系统键盘弹起时可视区变矮，布局跟着缩，底部统计栏不会被顶出屏幕。 */
+  html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+  body { -webkit-text-size-adjust: 100%; touch-action: manipulation; }
+  ::-webkit-scrollbar { width: 0; height: 0; }
+
+  .app {
+    height: var(--app-h, 100vh);
+    min-height: 0;
+    padding: 0 14px;
+  }
+
+  /* ── 顶栏：品牌与图标一行，模式栏折到下一行横滑 ── */
+  .topbar { padding: 10px 0 8px; gap: 10px; }
+  .brand-mark { width: 28px; height: 28px; border-radius: 8px; font-size: 14px; }
+  .brand-text { font-size: 15px; }
+  .brand-text i { font-size: 9px; letter-spacing: .12em; }
+  .icon-btn { width: 32px; height: 32px; border-radius: 9px; }
+  .icon-btn svg { width: 16px; height: 16px; }
+  #kbBtn { display: none; }
+
+  .mode-nav {
+    order: 3;
+    width: 100%;
+    margin-top: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .mode-nav button { padding: 6px 10px; font-size: 13px; }
+
+  /* ── 子选项：一行横滑，不再折成两行 ── */
+  .subbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 9px 0 8px;
+    min-height: 0;
+    scrollbar-width: none;
+  }
+  .subbar::-webkit-scrollbar { display: none; }
+  .subbar > * { flex-shrink: 0; }
+
+  /* ── 打字区：留白收紧（保持上下居中，键盘弹起时舞台变矮会自动跟着收） ── */
+  .stage { padding: 4px 0 0; }
+  .typing-wrap { max-width: none; }
+  .typing-wrap::after { inset: -2px -14px; }
+  .words { -webkit-touch-callout: none; }
+  .hint { margin-top: 12px; font-size: 12.5px; }
+
+  /* 触屏上键盘没法用，隐藏（系统键盘才是真键盘） */
   .keyboard { display: none !important; }
-  .record-row { grid-template-columns: 1fr auto auto; }
+
+  /* ── 统计栏：收成一行，重开只留图标 ── */
+  .hud { flex-wrap: nowrap; gap: 8px; padding: 8px 0 10px; }
+  .hud-left { flex-shrink: 0; }
+  .stats { margin-left: 0; flex: 1; gap: 4px; justify-content: space-between; }
+  .stat { min-width: 0; flex: 1; align-items: center; }
+  .stat b { font-size: 16px; }
+  .stat span { font-size: 9px; letter-spacing: .05em; }
+  .restart-btn { padding: 8px 10px; gap: 0; }
+  .restart-btn .rt-text, .restart-btn .rt-kbd { display: none; }
+  .restart-btn svg { width: 17px; height: 17px; }
+
+  /* ── 遮罩与面板：罩住整块可视区，别被键盘压住 ── */
+  .overlay { height: var(--app-h, 100vh); padding: 14px 12px 32px; }
+  .panel { padding: 22px 18px; border-radius: var(--radius-m); }
+  .result-grid { grid-template-columns: 1fr; gap: 16px; }
+  .result-hero { text-align: left; }
+  .result-hero .big { font-size: 52px; }
+  .result-hero .big.small { font-size: 40px; }
+  .result-metrics { grid-template-columns: repeat(auto-fit, minmax(78px, 1fr)); gap: 2px 10px; }
+  .metric b { font-size: 19px; }
+  .chart-box { margin-top: 20px; padding: 12px 12px 6px; }
+  #chart { height: 132px; }
+  .result-actions { margin-top: 20px; }
+  .custom-area { min-height: 130px; font-size: 16px; }
+  .record-row { grid-template-columns: 1fr auto auto auto; gap: 10px; font-size: 12.5px; }
   .record-row .rdate { display: none; }
+  .tabs { width: 100%; }
+  .tabs button { flex: 1; padding: 7px 8px; }
+  .setting { gap: 12px; padding: 13px 0; }
+
+  /* 还没聚焦捕获框时把提示点亮，告诉用户「先点一下」 */
+  body.capture-off .hint { color: var(--accent); font-weight: 600; }
+  body.capture-off .typing-wrap { cursor: pointer; }
 }
 
 @media print { .keyboard, .topbar, .hud { display: none; } }
